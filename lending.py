@@ -22,21 +22,21 @@ st.set_page_config(layout="wide")
 subgraphs = requests.get('https://subgraphs.messari.io/deployments.json')
 subgraph_json = subgraphs.json()
 
-protocols = list(subgraph_json['lending-protocols'].keys())
+protocols = list(subgraph_json['lending'].keys())
 protocol = st.sidebar.selectbox(
     'Select a protocol:',
     protocols,
     key='protocol'
 )
 
-chains = list(subgraph_json['lending-protocols'][protocol].keys())
+chains = list(subgraph_json['lending'][protocol].keys())
 chain = st.sidebar.selectbox(
     'Select a chain:',
     chains,
     key='chain'
 )
 
-BASE_URL = subgraph_json['lending-protocols'][protocol][chain]
+BASE_URL = subgraph_json['lending'][protocol][chain]
 
 
 
@@ -87,7 +87,7 @@ def get_custom_query(BASE_URL:str) -> pd.DataFrame:
     df = sg.query_df([query1, query2])
     return df
 
-# @st.cache
+@st.cache
 def get_all_markets_ss(BASE_URL:str, markets, start_date:int, end_date:int) -> pd.DataFrame:
     def get_market_ss(BASE_URL:str, market:str, start_date:int, end_date:int) -> pd.DataFrame:
         skip = 0
@@ -284,7 +284,7 @@ with column1:
     fig1 = make_subplots()
     fig1.add_trace(go.Pie(
         labels=df1.index,
-        values=df1['Total Deposited (USD)']))
+        values=df1.loc[:, 'Total Deposited (USD)']))
     fig1.update_layout(
         title_text='<b>Total Deposited (USD)</b>',
     )
@@ -296,15 +296,15 @@ with column1:
         st.dataframe(df1)
         
 with column2:
-    df2 = df_markets[['totalBorrowBalanceUSD']]
+    df2 = df_markets.loc[:, ['totalBorrowBalanceUSD']]
     df2.rename(columns = {'totalBorrowBalanceUSD':'Total Borrowed (USD)'}, inplace = True)
-    
-    
+
+
     df2 = df2.sort_values(by=['Total Borrowed (USD)'], ascending=False)
     fig2 = make_subplots()
     fig2.add_trace(go.Pie(
         labels=df2.index,
-        values=df2['Total Borrowed (USD)']))
+        values=df2.loc[:, 'Total Borrowed (USD)']))
     fig2.update_layout(
         title_text='<b>Total Borrowed (USD)</b>',
     )
@@ -316,7 +316,7 @@ with column2:
         st.dataframe(df2)
         
 with column3:
-    df3 = df_markets[['Available to Borrow (USD)']]
+    df3 = df_markets.loc[:, ['Available to Borrow (USD)']]
     df3 = df3.sort_values(by=['Available to Borrow (USD)'], ascending=False)
     fig3 = make_subplots()
     fig3.add_trace(go.Pie(
@@ -349,15 +349,15 @@ with column2:
     g4 = choose_granularity('g4')    
     
 with column1:    
-    df4 = df_usageMetrics[['usageMetricsDailySnapshots_dailyTransactionCount', 'usageMetricsDailySnapshots_dailyActiveUsers']]
+    df4 = df_usageMetrics.loc[:, ['usageMetricsDailySnapshots_dailyTransactionCount', 'usageMetricsDailySnapshots_dailyActiveUsers']]
     df4 = df4.resample(g4).sum()
     df4.rename(columns = {'usageMetricsDailySnapshots_dailyTransactionCount':'Daily Transaction Count'}, inplace = True)
     df4.rename(columns = {'usageMetricsDailySnapshots_dailyActiveUsers':'Daily Unique Active User'}, inplace = True)
 
 
     fig4 = go.Figure(data=[
-        go.Bar(name='Daily Transaction Count', x=df4.index, y=df4['Daily Transaction Count'].tolist()),
-        go.Bar(name='Daily Unique Active User', x=df4.index, y=df4['Daily Unique Active User'].tolist())
+        go.Bar(name='Daily Transaction Count', x=df4.index, y=df4.loc[:,'Daily Transaction Count']),
+        go.Bar(name='Daily Unique Active User', x=df4.index, y=df4.loc[:, 'Daily Unique Active User'])
     ])
 
     fig4.update_layout(template=yulesa_template)
@@ -378,11 +378,11 @@ with column4:
     g5 = choose_granularity('g5')
 
 with column3:
-    df5 = df_usageMetrics[['usageMetricsDailySnapshots_dailyDepositCount',
-                           'usageMetricsDailySnapshots_dailyWithdrawCount',
-                           'usageMetricsDailySnapshots_dailyBorrowCount',
-                           'usageMetricsDailySnapshots_dailyRepayCount',
-                           'usageMetricsDailySnapshots_dailyLiquidateCount']]
+    df5 = df_usageMetrics.loc[:, ['usageMetricsDailySnapshots_dailyDepositCount',
+                       'usageMetricsDailySnapshots_dailyWithdrawCount',
+                       'usageMetricsDailySnapshots_dailyBorrowCount',
+                       'usageMetricsDailySnapshots_dailyRepayCount',
+                       'usageMetricsDailySnapshots_dailyLiquidateCount']]
     df5 = df5.resample(g5).sum()
     df5.rename(columns = {'usageMetricsDailySnapshots_dailyDepositCount':'Deposits',
                          'usageMetricsDailySnapshots_dailyWithdrawCount':'Withdraws',
@@ -392,19 +392,20 @@ with column3:
 
 
     fig5 = go.Figure(data=[
-        go.Bar(name='Deposits', x=df5.index, y=df5['Deposits'].tolist()),
-        go.Bar(name='Withdraws', x=df5.index, y=df5['Withdraws'].tolist()),
-        go.Bar(name='Borrows', x=df5.index, y=df5['Borrows'].tolist()),
-        go.Bar(name='Repays', x=df5.index, y=df5['Repays'].tolist()),
-        go.Bar(name='Liquidations', x=df5.index, y=df5['Liquidations'].tolist()),
+        go.Bar(name='Deposits', x=df5.index, y=df5.loc[:, 'Deposits']),
+        go.Bar(name='Withdraws', x=df5.index, y=df5.loc[:, 'Withdraws']),
+        go.Bar(name='Borrows', x=df5.index, y=df5.loc[:, 'Borrows']),
+        go.Bar(name='Repays', x=df5.index, y=df5.loc[:, 'Repays']),
+        go.Bar(name='Liquidations', x=df5.index, y=df5.loc[:, 'Liquidations']),
     ])
-    
+
     fig5.update_layout(template=yulesa_template)
     fig5.update_layout(
         barmode='group',
         title_text='<b>Actions Count</b>',
         xaxis_title='Time'
     )
+    
     column3.plotly_chart(fig5, use_container_width=True)
     with st.expander("Chart Datails"):
         st.write("""
@@ -428,7 +429,7 @@ with column2:
     g6 = choose_granularity('g6')
     
 with column1:
-    df6 = df_financials[['financialsDailySnapshots_dailyTotalRevenueUSD',
+    df6 = df_financials.loc[:, ['financialsDailySnapshots_dailyTotalRevenueUSD',
                      'financialsDailySnapshots_dailySupplySideRevenueUSD',
                      'financialsDailySnapshots_dailyProtocolSideRevenueUSD']]
     df6.rename(columns = {
@@ -439,9 +440,9 @@ with column1:
     df6 = df6.resample(g6).sum()
 
     fig6 = go.Figure(data=[
-        go.Bar(name='Protocol Side Revenue (USD)', x=df6.index, y=df6['Protocol Side Revenue (USD)'].tolist()),
-        go.Bar(name='Supply Side Revenue (USD)', x=df6.index, y=df6['Supply Side Revenue (USD)'].tolist()),
-        go.Scatter(name='Total Revenue (USD)', x=df6.index, y=df6['Total Revenue (USD)'].tolist())
+        go.Bar(name='Protocol Side Revenue (USD)', x=df6.index, y=df6.loc[:, 'Protocol Side Revenue (USD)']),
+        go.Bar(name='Supply Side Revenue (USD)', x=df6.index, y=df6.loc[:, 'Supply Side Revenue (USD)']),
+        go.Scatter(name='Total Revenue (USD)', x=df6.index, y=df6.loc[:, 'Total Revenue (USD)'])
     ])
 
     fig6.update_layout(template=yulesa_template)
@@ -462,18 +463,18 @@ with column4:
     g7 = choose_granularity('g7')
     
 with column3:   
-    df7 = df_financials[['financialsDailySnapshots_totalDepositBalanceUSD',
-                         'financialsDailySnapshots_totalBorrowBalanceUSD']]
+    df7 = df_financials.loc[:, ['financialsDailySnapshots_totalDepositBalanceUSD',
+                     'financialsDailySnapshots_totalBorrowBalanceUSD']]
     df7.rename(columns = {
         'financialsDailySnapshots_totalDepositBalanceUSD':'Outstanding Deposits (USD)',
         'financialsDailySnapshots_totalBorrowBalanceUSD': 'Outstanding Loans (USD)'}, inplace = True)
-    df7['Utilization (%)'] = df7['Outstanding Loans (USD)'] / df7['Outstanding Deposits (USD)']
+    df7['Utilization (%)'] = df7.loc[:,'Outstanding Loans (USD)'] / df7.loc[:,'Outstanding Deposits (USD)']
     df7 = df7.resample(g7).last()
-    
+
     fig7 = make_subplots(specs=[[{"secondary_y": True}]])
-    fig7.add_trace(go.Scatter(name='Outstanding Deposits (USD)', x=df7.index, y=df7['Outstanding Deposits (USD)'].tolist(), mode='lines', fill='tozeroy'), secondary_y=False)
-    fig7.add_trace(go.Scatter(name='Outstanding Loans (USD)', x=df7.index, y=df7['Outstanding Loans (USD)'].tolist(), mode='lines', fill='tozeroy'), secondary_y=False)
-    fig7.add_trace(go.Scatter(name='Utilization (%)', x=df7.index, y=df7['Utilization (%)'].tolist()), secondary_y=True)
+    fig7.add_trace(go.Scatter(name='Outstanding Deposits (USD)', x=df7.index, y=df7['Outstanding Deposits (USD)'], mode='lines', fill='tozeroy'), secondary_y=False)
+    fig7.add_trace(go.Scatter(name='Outstanding Loans (USD)', x=df7.index, y=df7['Outstanding Loans (USD)'], mode='lines', fill='tozeroy'), secondary_y=False)
+    fig7.add_trace(go.Scatter(name='Utilization (%)', x=df7.index, y=df7['Utilization (%)']), secondary_y=True)
 
     fig7.update_layout(template=yulesa_template)
     fig7.update_layout(
@@ -508,25 +509,25 @@ with column2:
     g8 = choose_granularity('g8')
     
 with column1:
-    df8 = df_financials[['financialsDailySnapshots_dailyDepositUSD',
+    df8 = df_financials.loc[:, ['financialsDailySnapshots_dailyDepositUSD',
                      'financialsDailySnapshots_dailyWithdrawUSD',
                      'financialsDailySnapshots_totalDepositBalanceUSD']]
     df8.rename(columns = {
         'financialsDailySnapshots_dailyDepositUSD':'Deposits (USD)',
         'financialsDailySnapshots_dailyWithdrawUSD': 'Withdraws (USD)',
         'financialsDailySnapshots_totalDepositBalanceUSD': 'Outstanding Deposits (USD)'}, inplace = True)
-    df8['Net Change (USD)'] = df8['Deposits (USD)'] - df8['Withdraws (USD)']
-    df8['Withdraws (USD)'] = -df8['Withdraws (USD)']
-    df8a = df8[['Deposits (USD)', 'Withdraws (USD)', 'Net Change (USD)']].resample(g8).sum()
-    df8b = df8[['Outstanding Deposits (USD)']].resample(g8).last()
+    df8['Net Change (USD)'] = df8.loc[:, 'Deposits (USD)'] - df8.loc[:, 'Withdraws (USD)']
+    df8['Withdraws (USD)'] = -df8.loc[:, 'Withdraws (USD)']
+    df8a = df8.loc[:, ['Deposits (USD)', 'Withdraws (USD)', 'Net Change (USD)']].resample(g8).sum()
+    df8b = df8.loc[:, ['Outstanding Deposits (USD)']].resample(g8).last()
     df8 = pd.concat([df8a, df8b], axis=1)
-    
+
 
     fig8 = make_subplots(specs=[[{"secondary_y": True}]])
-    fig8.add_trace(go.Bar(name='Deposits (USD)', x=df8.index, y=df8['Deposits (USD)'].tolist()), secondary_y=False)
-    fig8.add_trace(go.Bar(name='Withdraws (USD)', x=df8.index, y=df8['Withdraws (USD)'].tolist()), secondary_y=False)
-    fig8.add_trace(go.Scatter(name='Net Change (USD))', x=df8.index, y=df8['Net Change (USD)'].tolist(), mode='markers'), secondary_y=False)
-    fig8.add_trace(go.Scatter(name='Outstanding Deposits (USD)', x=df8.index, y=df7['Outstanding Deposits (USD)'].tolist()), secondary_y=True)
+    fig8.add_trace(go.Bar(name='Deposits (USD)', x=df8.index, y=df8.loc[:, 'Deposits (USD)']), secondary_y=False)
+    fig8.add_trace(go.Bar(name='Withdraws (USD)', x=df8.index, y=df8.loc[:, 'Withdraws (USD)']), secondary_y=False)
+    fig8.add_trace(go.Scatter(name='Net Change (USD))', x=df8.index, y=df8.loc[:, 'Net Change (USD)'], mode='markers'), secondary_y=False)
+    fig8.add_trace(go.Scatter(name='Outstanding Deposits (USD)', x=df8.index, y=df7.loc[:, 'Outstanding Deposits (USD)']), secondary_y=True)
 
     fig8.update_layout(template=yulesa_template)
     fig8.update_layout(
@@ -547,26 +548,26 @@ with column4:
     g9 = choose_granularity('g9')
     
 with column3:
-    df9 = df_financials[['financialsDailySnapshots_dailyBorrowUSD',
-                     'financialsDailySnapshots_dailyRepayUSD',
-                     'financialsDailySnapshots_totalBorrowBalanceUSD']]
+    df9 = df_financials.loc[:, ['financialsDailySnapshots_dailyBorrowUSD',
+                             'financialsDailySnapshots_dailyRepayUSD',
+                             'financialsDailySnapshots_totalBorrowBalanceUSD']]
     df9.rename(columns = {
         'financialsDailySnapshots_dailyBorrowUSD':'Borrows (USD)',
         'financialsDailySnapshots_dailyRepayUSD': 'Repays (USD)',
         'financialsDailySnapshots_totalBorrowBalanceUSD': 'Outstanding Loans (USD)'}, inplace = True)
-    df9['Net Change (USD)'] = df9['Borrows (USD)'] - df9['Repays (USD)']
-    df9['Repays (USD)'] = -df9['Repays (USD)']
-    df9a = df9[['Borrows (USD)', 'Repays (USD)', 'Net Change (USD)']].resample(g9).sum()
-    df9b = df9[['Outstanding Loans (USD)']].resample(g9).last()
+    df9['Net Change (USD)'] = df9.loc[:,'Borrows (USD)'] - df9.loc[:, 'Repays (USD)']
+    df9['Repays (USD)'] = -df9.loc[:, 'Repays (USD)']
+    df9a = df9.loc[:, ['Borrows (USD)', 'Repays (USD)', 'Net Change (USD)']].resample(g9).sum()
+    df9b = df9.loc[:, ['Outstanding Loans (USD)']].resample(g9).last()
     df9 = pd.concat([df9a, df9b], axis=1)
-    
-    
+
+
 
     fig9 = make_subplots(specs=[[{"secondary_y": True}]])
-    fig9.add_trace(go.Bar(name='Borrows (USD)', x=df9.index, y=df9['Borrows (USD)'].tolist()), secondary_y=False)
-    fig9.add_trace(go.Bar(name='Repays (USD)', x=df9.index, y=df9['Repays (USD)'].tolist()), secondary_y=False)
-    fig9.add_trace(go.Scatter(name='Net Change (USD))', x=df9.index, y=df9['Net Change (USD)'].tolist(), mode='markers'), secondary_y=False)
-    fig9.add_trace(go.Scatter(name='Outstanding Loans (USD)', x=df9.index, y=df7['Outstanding Loans (USD)'].tolist()), secondary_y=True)
+    fig9.add_trace(go.Bar(name='Borrows (USD)', x=df9.index, y=df9.loc[:, 'Borrows (USD)']), secondary_y=False)
+    fig9.add_trace(go.Bar(name='Repays (USD)', x=df9.index, y=df9.loc[:, 'Repays (USD)']), secondary_y=False)
+    fig9.add_trace(go.Scatter(name='Net Change (USD))', x=df9.index, y=df9.loc[:, 'Net Change (USD)'], mode='markers'), secondary_y=False)
+    fig9.add_trace(go.Scatter(name='Outstanding Loans (USD)', x=df9.index, y=df7.loc[:, 'Outstanding Loans (USD)']), secondary_y=True)
 
     fig9.update_layout(template=yulesa_template)
     fig9.update_layout(
@@ -599,19 +600,19 @@ with column2:
     g10 = choose_granularity('g10')
     
 with column1:
-    df10 = markets_snapshots[['inputToken.symbol',
-                              'dailyLiquidateUSD']]
+    df10 = markets_snapshots.loc[:, ['inputToken.symbol',
+                                      'dailyLiquidateUSD']]
     df10.rename(columns = {'inputToken.symbol': 'Markets',
                            'dailyLiquidateUSD': 'Liquidations (USD)'}, inplace = True)
-    df10 = df10.groupby('Markets').resample(g10).sum()[['Liquidations (USD)']].reset_index('Markets')
+    df10 = df10.groupby('Markets').resample(g10).sum().loc[:, ['Liquidations (USD)']].reset_index('Markets')
     top_markets = df10.groupby('Markets').max().sort_values('Liquidations (USD)', ascending = False).head()
-    df10.loc[~df10['Markets'].isin(top_markets.index.tolist()), 'Markets'] = 'Other'
+    df10.loc[~df10.loc[:, 'Markets'].isin(top_markets.index), 'Markets'] = 'Other'
     df10 = df10.groupby(['timestamp','Markets']).sum().swaplevel(axis=0)
     graph_order = df10.groupby('Markets').max().sort_values('Liquidations (USD)', ascending = False)
 
     fig10 = go.Figure()
     for token in graph_order.index:
-        fig10.add_trace(go.Bar(name=token, x=df10.loc[token].index, y=df10.loc[token]['Liquidations (USD)'].tolist()))
+        fig10.add_trace(go.Bar(name=token, x=df10.loc[token].index, y=df10.loc[token, 'Liquidations (USD)']))
 
     fig10.update_layout(template=yulesa_template)
     fig10.update_layout(
@@ -631,15 +632,15 @@ with column4:
     g11 = choose_granularity('g11')
     
 with column3:
-    df11 = df_financials[['financialsDailySnapshots_cumulativeDepositUSD',
-                         'financialsDailySnapshots_cumulativeBorrowUSD']]
+    df11 = df_financials.loc[:, ['financialsDailySnapshots_cumulativeDepositUSD',
+                                 'financialsDailySnapshots_cumulativeBorrowUSD']]
     df11.rename(columns = {
         'financialsDailySnapshots_cumulativeDepositUSD':'Cumulative Deposits (USD)',
         'financialsDailySnapshots_cumulativeBorrowUSD': 'Cumulative Loans (USD)'}, inplace = True)
     df11 = df11.resample(g11).last()
-    
-    fig11 = go.Figure(data=[go.Scatter(name='Cumulative Deposits (USD)', x=df11.index, y=df11['Cumulative Deposits (USD)'].tolist(), mode='lines', fill='tozeroy'),
-                            go.Scatter(name='Cumulative Loans (USD)', x=df11.index, y=df11['Cumulative Loans (USD)'].tolist(), mode='lines', fill='tozeroy')])
+
+    fig11 = go.Figure(data=[go.Scatter(name='Cumulative Deposits (USD)', x=df11.index, y=df11.loc[:, 'Cumulative Deposits (USD)'], mode='lines', fill='tozeroy'),
+                            go.Scatter(name='Cumulative Loans (USD)', x=df11.index, y=df11.loc[:, 'Cumulative Loans (USD)'], mode='lines', fill='tozeroy')])
 
     fig11.update_layout(template=yulesa_template)
     fig11.update_layout(
@@ -670,20 +671,20 @@ with column2:
     g12 = choose_granularity('g12')
     
 with column1:    
-    df12 = markets_snapshots[['id',
-                              'inputToken.symbol',
-                              'totalDepositBalanceUSD']]
+    df12 = markets_snapshots.loc[:, ['id',
+                                     'inputToken.symbol',
+                                     'totalDepositBalanceUSD']]
     df12.rename(columns = {'inputToken.symbol': 'Markets',
                             'totalDepositBalanceUSD':'Total Deposited (USD)'}, inplace = True)
     df12 = df12.groupby(['id', 'Markets'], as_index=False).resample(g12).last()
     top_markets = df12.groupby('id').max().sort_values('Total Deposited (USD)', ascending = False).head()
-    df12.loc[~df12['id'].isin(top_markets.index.tolist()), 'Markets'] = 'Other'
+    df12.loc[~df12.loc[:, 'id'].isin(top_markets.index), 'Markets'] = 'Other'
     df12 = df12.groupby(['timestamp','Markets']).sum().swaplevel(axis=0)
     graph_order = df12.groupby('Markets').max().sort_values('Total Deposited (USD)', ascending = False)
 
     fig12 = go.Figure()
     for token in graph_order.index:
-        fig12.add_trace(go.Scatter(name=token, x=df12.loc[token].index, y=df12.loc[token]['Total Deposited (USD)'].tolist(), stackgroup='one', hoverinfo='x+y'))
+        fig12.add_trace(go.Scatter(name=token, x=df12.loc[token].index, y=df12.loc[token, 'Total Deposited (USD)'], stackgroup='one', hoverinfo='x+y'))
 
     fig12.update_layout(template=yulesa_template)
     fig12.update_layout(
@@ -702,20 +703,20 @@ with column4:
     g13 = choose_granularity('g13')
     
 with column3:    
-    df13 = markets_snapshots[['id',
-                              'inputToken.symbol',
-                              'totalBorrowBalanceUSD']]
+    df13 = markets_snapshots.loc[:, ['id',
+                                     'inputToken.symbol',
+                                     'totalBorrowBalanceUSD']]
     df13.rename(columns = {'inputToken.symbol': 'Markets',
                            'totalBorrowBalanceUSD':'Total Loans (USD)'}, inplace = True)
     df13 = df13.groupby(['id', 'Markets'], as_index=False).resample(g13).last()
-    # top_markets = df13.groupby('Markets').max().sort_values('Total Loans (USD)', ascending = False).head()  # Comment line to keep the same top_markets as the graph above.
-    df13.loc[~df13['id'].isin(top_markets.index.tolist()), 'Markets'] = 'Other'
+    # top_markets = df13.groupby('Markets').max().sort_values('Total Loans (USD)', ascending = False).head()
+    df13.loc[~df13.loc[:, 'id'].isin(top_markets.index), 'Markets'] = 'Other'
     df13 = df13.groupby(['timestamp','Markets']).sum().swaplevel(axis=0)
-    graph_order = df13.groupby('Markets').max().sort_values('Total Loans (USD)', ascending = False) # Comment line to keep the same order as the graph above.
+    graph_order = df13.groupby('Markets').max().sort_values('Total Loans (USD)', ascending = False)
 
     fig13 = go.Figure()
     for token in graph_order.index:
-        fig13.add_trace(go.Scatter(name=token, x=df13.loc[token,:].index, y=df13.loc[token,:]['Total Loans (USD)'].tolist(), stackgroup='one', hoverinfo='x+y'))
+        fig13.add_trace(go.Scatter(name=token, x=df13.loc[token,:].index, y=df13.loc[token, 'Total Loans (USD)'], stackgroup='one', hoverinfo='x+y'))
 
     fig13.update_layout(template=yulesa_template)
     fig13.update_layout(
@@ -745,19 +746,19 @@ with column2:
     g14 = choose_granularity('g14')
     
 with column1:    
-    df14 = markets_snapshots[['id',
-                              'inputToken.symbol',
-                              'totalDepositBalanceUSD',
-                              'totalBorrowBalanceUSD']]
+    df14 = markets_snapshots.loc[:, ['id',
+                                     'inputToken.symbol',
+                                     'totalDepositBalanceUSD',
+                                     'totalBorrowBalanceUSD']]
     df14.rename(columns = {'inputToken.symbol': 'Markets',
                             'totalDepositBalanceUSD':'Total Deposited (USD)',
                             'totalBorrowBalanceUSD':'Total Borrow (USD)'}, inplace = True)
     df14 = pd.pivot_table(df14, index=['timestamp'], columns=['id', 'Markets'])
     df14 = df14.fillna(method='ffill')
     df14 = df14.melt(ignore_index=False).pivot_table(index=['timestamp','id', 'Markets'], columns=[None]).droplevel(level=0, axis=1).reset_index(['id', 'Markets'])
-    df14['Utilization (%)'] = df14['Total Borrow (USD)']/df14['Total Deposited (USD)']
+    df14['Utilization (%)'] = df14.loc[:, 'Total Borrow (USD)']/df14.loc[:, 'Total Deposited (USD)']
     df14 = df14.groupby(['id', 'Markets'], as_index=False).resample(g14).last().droplevel(level=0, axis=0)
-    
+
     fig14 = go.Figure()
     for token_address in filter(None, df14['id'].unique()):
         fig14.add_trace(go.Scatter(name=df14.loc[df14['id'] == token_address]['Markets'][0], x=df14.loc[df14['id'] == token_address].index, y=df14.loc[df14['id'] == token_address]['Utilization (%)'].tolist()))
@@ -766,7 +767,6 @@ with column1:
         title_text='<b>Utilization</b>',
         xaxis_title='Time'
     )
-
     st.plotly_chart(fig14, use_container_width=True)
     with st.expander("Chart Datails"):
         st.write("""
