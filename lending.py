@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-# import time
+import asyncio
 import datetime
 from datetime import datetime as dt
 from subgrounds import Subgrounds
@@ -16,7 +16,6 @@ from plotly.subplots import make_subplots
 
 
 st.set_page_config(layout="wide")
-
 
 ###### Side Bar ######
 
@@ -117,21 +116,6 @@ for k1 in list(temp_dict.keys()):
 
 #######################################################################################################
 
-
-def get_df(BASE_URL:str, payload:str) -> pd.DataFrame:
-    response = requests.post(BASE_URL, json=payload).json()
-    df = pd.DataFrame(response['data'][list(response['data'])[0]])
-    return df
-
-
-def get_all_schema(BASE_URL:str, fieldPath:str, start_date, end_date) -> pd.DataFrame:
-    sg = Subgrounds()
-    protocol = sg.load_subgraph(BASE_URL)
-    query = getattr(protocol.Query, fieldPath)(first=100000, where={'timestamp_gte': start_date, 'timestamp_lte':end_date})
-    df = sg.query_df([query])
-            
-    return df
-
 def choose_granularity(_key:str) -> str:
     choice = st.radio(
         'Data granulariry:',
@@ -162,19 +146,128 @@ def show_details(title:str, details:str, df):
            key=title+'_csv'
         )
 
+# @st.cache
+def get_df( _payload:str, BASE_URL:str) -> pd.DataFrame:
+    response = requests.post(BASE_URL, json=_payload).json()
+    df = pd.DataFrame(response['data'][list(response['data'])[0]])
+    return df
+ 
+async def get_chain(_payload:str, _BASE_URL:str) -> pd.DataFrame:
+    df = get_df(_payload, _BASE_URL)
+    df['inputToken'] = pd.DataFrame([*df['inputToken']])[['symbol']]
+    df.set_index('inputToken', inplace=True)
+    return df
 
-@st.cache
-def get_markets(_subgraph_dict)-> pd.DataFrame:
-    #inicialize a list which is going to receive a df with all versions selected
-    versions_df_list = []
-    #interact in the subgraph_dict
-    for k1 in list(_subgraph_dict.keys()):
-        #inicialize a list which is going to receive a df with all chains selected
-        chains_df_list = []
-        for k2 in list(_subgraph_dict[k1].keys()):
-            #get the subgraph URL
-            BASE_URL = _subgraph_dict[k1][k2]
-            payload1 = {
+async def get_version(_payload, _version_dict):
+    chains_df_list = await asyncio.gather(*(get_chain(_payload, _version_dict[k2]) for k2 in list(_version_dict.keys())))
+    chainsdf = pd.concat(chains_df_list, keys = list(_version_dict.keys()), names=['Chain'], axis=0)
+    return chainsdf
+
+async def get_protocol(_subgraph_dict, _payload)-> pd.DataFrame:
+    versions_df_list = await asyncio.gather(*(get_version(_payload, _subgraph_dict[k1]) for k1 in list(_subgraph_dict.keys())))
+    df = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
+    df['totalDepositBalanceUSD'] = df['totalDepositBalanceUSD'].astype('double')
+    df['totalBorrowBalanceUSD'] = df['totalBorrowBalanceUSD'].astype('double')
+    df['Available to Borrow (USD)'] = df['totalDepositBalanceUSD']-df['totalBorrowBalanceUSD']    
+    return df
+
+
+
+
+
+
+# @st.cache   
+async def get_all_schema(_BASE_URL:str, _fieldPath:str, _start_date, _end_date) -> pd.DataFrame:
+    sg = Subgrounds()
+    protocol = sg.load_subgraph(_BASE_URL)
+    query = getattr(protocol.Query, _fieldPath)(first=100000, where= {'timestamp_lte':_end_date, 'timestamp_gte':_start_date})
+    df = sg.query_df([query])
+    df.rename(columns = {(_fieldPath+'_timestamp'):'Timestamp'}, inplace = True)
+    df.set_index('Timestamp', inplace=True)
+    df.index = pd.to_datetime(df.index, unit='s').to_period('D').to_timestamp()
+    df.sort_index(inplace=True)
+    return df
+
+async def get_all_chain_schema(_chain_dict, _fieldPath:str, _start_date, _end_date) -> pd.DataFrame:
+    chains_df_list = await asyncio.gather(*(get_all_schema(_chain_dict[k], _fieldPath, _start_date, _end_date) for k in _chain_dict.keys()))
+    chainsdf = pd.concat(chains_df_list, keys = list(_chain_dict.keys()), names=['Chain'], axis=0)
+    return chainsdf
+
+# @st.cache
+async def get_all_version_schema(_version_dict, _fieldPath:str, _start_date, _end_date) -> pd.DataFrame:   
+    versions_df_list = await asyncio.gather(*(get_all_chain_schema(_version_dict[k], _fieldPath, _start_date, _end_date) for k in _version_dict.keys()))
+    versiondf = pd.concat(versions_df_list, keys = list(_version_dict.keys()), names=['Version'], axis=0)
+    return versiondf
+
+
+
+
+
+
+
+
+# @st.cache   
+async def get_market(_payload:str, _BASE_URL:str, _market:str, _start_date:int, _end_date:int) -> pd.DataFrame:
+    _skip = 0
+    edited_payload = _payload.copy()
+    edited_payload['query'] = _payload['query'].format(market=_market, start_date=_start_date, end_date=_end_date, skip=_skip)
+    tmp_df = get_df( edited_payload, _BASE_URL)
+    df = tmp_df.copy()
+    while len(tmp_df.index) == 1000:
+        _skip += 1000
+        edited_payload['query'] = _payload['query'].format(market=_market, start_date=_start_date, end_date=_end_date, skip=_skip)
+        tmp_df = get_df(edited_payload, _BASE_URL)
+        df = pd.concat([df, tmp_df])
+    return df
+
+async def get_all_markets(_payload:str, _BASE_URL:str, _markets, _start_date:int, _end_date:int) -> pd.DataFrame:
+    markets_df = await asyncio.gather(*(get_market(_payload, _BASE_URL, market, _start_date, _end_date) for market in _markets['id']))
+    df = pd.concat(markets_df)
+    df = df.astype({'timestamp': 'int',
+                            'totalValueLockedUSD': 'double',
+                            'cumulativeSupplySideRevenueUSD': 'double',
+                            'dailySupplySideRevenueUSD': 'double',
+                            'cumulativeProtocolSideRevenueUSD': 'double',
+                            'dailyProtocolSideRevenueUSD': 'double',
+                            'cumulativeTotalRevenueUSD': 'double',
+                            'dailyTotalRevenueUSD': 'double',
+                            'totalDepositBalanceUSD': 'double',
+                            'dailyDepositUSD': 'double',
+                            'cumulativeDepositUSD': 'double',
+                            'totalBorrowBalanceUSD': 'double',
+                            'dailyBorrowUSD': 'double',
+                            'cumulativeBorrowUSD': 'double',
+                            'dailyLiquidateUSD': 'double',
+                            'cumulativeLiquidateUSD': 'double',
+                            'dailyWithdrawUSD': 'double',
+                            'dailyRepayUSD': 'double',
+                            'inputTokenBalance': 'double',
+                            'inputTokenPriceUSD': 'double',
+                            'outputTokenSupply': 'double',
+                            'outputTokenPriceUSD': 'double',
+                            'exchangeRate': 'double'})
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s').dt.to_period('D').dt.to_timestamp()
+    df.set_index('timestamp', inplace=True)
+    df.sort_index(inplace=True)
+    df = pd.concat([pd.json_normalize(df['market']).set_index(df.index), df.drop('market', axis=1)], axis=1)
+    return df
+
+async def get_all_chains_markets(_payload:str, _chain_dict, _markets, _start_date:int, _end_date:int)-> pd.DataFrame:
+    chains_df_list = await asyncio.gather(*(get_all_markets(_payload, _chain_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _chain_dict.keys()))
+    chainsdf = pd.concat(chains_df_list, keys = list(_chain_dict.keys()), names=['Chain'], axis=0)
+    chainsdf.sort_index()
+    return chainsdf
+
+# @st.cache
+async def get_all_protocol_markets(_payload:str, _version_dict, _markets, _start_date, _end_date)-> pd.DataFrame:
+    versions_df_list = await asyncio.gather(*(get_all_chains_markets(_payload, _version_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _version_dict.keys()))
+    versionsdf = pd.concat(versions_df_list,keys = list(_version_dict.keys()), names=['Version'], axis=0)
+    versionsdf.sort_index()
+    return(versionsdf)
+
+
+
+payload1 = {
                 'query': 
                 '''
                     {
@@ -189,196 +282,75 @@ def get_markets(_subgraph_dict)-> pd.DataFrame:
                     }
                 '''        
             }
-            df_temp = get_df(BASE_URL, payload1)
-            df_temp['inputToken'] = pd.DataFrame([*df_temp['inputToken']])[['symbol']]
-            df_temp.set_index('inputToken', inplace=True)
-            chains_df_list.append(df_temp)
 
-        chainsdf = pd.concat(chains_df_list, keys = list(_subgraph_dict[k1].keys()), names=['Chain'], axis=0)
-        
-        versions_df_list.append(chainsdf)
-
-    _dfm1 = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
-
-    return _dfm1
-dfm1 = get_markets(subgraph_dict)
-df_markets = dfm1.copy()
-df_markets['totalDepositBalanceUSD'] = df_markets['totalDepositBalanceUSD'].astype('double')
-df_markets['totalBorrowBalanceUSD'] = df_markets['totalBorrowBalanceUSD'].astype('double')
-df_markets['Available to Borrow (USD)'] = df_markets['totalDepositBalanceUSD']-df_markets['totalBorrowBalanceUSD']
-
-@st.cache
-def get_usageMetrics(_subgraph_dict, _start_date, _end_date)-> pd.DataFrame:
-    versions_df_list = []
-    #interact in the subgraph_dict
-    for k1 in list(_subgraph_dict.keys()):
-        #inicialize a list which is going to receive a df with all chains selected
-        chains_df_list = []
-        for k2 in list(_subgraph_dict[k1].keys()):
-            #get the subgraph URL
-            BASE_URL = _subgraph_dict[k1][k2]
-            df_temp = get_all_schema(BASE_URL, 'usageMetricsDailySnapshots', _start_date, _end_date)
-            df_temp.rename(columns = {'usageMetricsDailySnapshots_timestamp':'Timestamp'}, inplace = True)
-            df_temp.set_index('Timestamp', inplace=True)
-            df_temp.index = pd.to_datetime(df_temp.index, unit='s').to_period('D').to_timestamp()
-            df_temp.sort_index(inplace=True)
-            chains_df_list.append(df_temp)
-
-        chainsdf = pd.concat(chains_df_list, keys = list(_subgraph_dict[k1].keys()), names=['Chain'], axis=0)
-        
-        versions_df_list.append(chainsdf)
-
-    _dfm2 = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
-    return(_dfm2)
-
-dfm2 = get_usageMetrics(subgraph_dict, st.session_state.start_date_updated, st.session_state.end_date_updated)
-df_usageMetrics = dfm2.copy()
-
-
-@st.cache
-def get_financialsMetrics(_subgraph_dict, _start_date, _end_date)-> pd.DataFrame:
-    versions_df_list = []
-    #interact in the subgraph_dict
-    for k1 in list(_subgraph_dict.keys()):
-        #inicialize a list which is going to receive a df with all chains selected
-        chains_df_list = []
-        for k2 in list(_subgraph_dict[k1].keys()):
-            #get the subgraph URL
-            BASE_URL = _subgraph_dict[k1][k2]
-            df_temp = get_all_schema(BASE_URL, 'financialsDailySnapshots', _start_date, _end_date)
-            df_temp.rename(columns = {'financialsDailySnapshots_timestamp':'Timestamp'}, inplace = True)
-            df_temp.set_index('Timestamp', inplace=True)
-            df_temp.index = pd.to_datetime(df_temp.index, unit='s').to_period('D').to_timestamp()
-            df_temp.sort_index(inplace=True)
-            chains_df_list.append(df_temp)
-
-        chainsdf = pd.concat(chains_df_list, keys = list(_subgraph_dict[k1].keys()), names=['Chain'], axis=0)
-        versions_df_list.append(chainsdf)
-
-    _dfm3 = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
-    return(_dfm3)
-
-dfm3 = get_financialsMetrics(subgraph_dict, st.session_state.start_date_updated, st.session_state.end_date_updated)
-df_financials = dfm3.copy()
-
-def get_market(BASE_URL:str, market:str, start_date:int, end_date:int) -> pd.DataFrame:
-    skip = 0
-    payload = {
+payload2 =  {
         'query':
-            '''query snapshots($market: String, $skip: Int, $start_date: Int, $end_date: Int){
-                marketDailySnapshots(first: 1000, where: {market: $market, timestamp_gte: $start_date, timestamp_lte: $end_date}, skip: $skip){
-                    timestamp
-                    market{
-                        id
-                        inputToken{
-                        symbol
-                        }
-                    }
-                    rates{
-                        rate
-                        side
-                    }
-                    totalValueLockedUSD
-                    cumulativeSupplySideRevenueUSD
-                    dailySupplySideRevenueUSD
-                    cumulativeProtocolSideRevenueUSD
-                    dailyProtocolSideRevenueUSD
-                    cumulativeTotalRevenueUSD
-                    dailyTotalRevenueUSD
-                    totalDepositBalanceUSD
-                    dailyDepositUSD
-                    cumulativeDepositUSD
-                    totalBorrowBalanceUSD
-                    dailyBorrowUSD
-                    cumulativeBorrowUSD
-                    dailyLiquidateUSD
-                    cumulativeLiquidateUSD
-                    dailyWithdrawUSD
-                    dailyRepayUSD
-                    inputTokenBalance
-                    inputTokenPriceUSD
-                    outputTokenSupply
-                    outputTokenPriceUSD
-                    exchangeRate
-                    rewardTokenEmissionsAmount
-                    rewardTokenEmissionsUSD
-                }
-            }''',
+            ''' {{
+                    marketDailySnapshots(first: 1000,
+                        skip: {skip},
+                        where: {{
+                            market: "{market}",
+                            timestamp_gte: {start_date},
+                            timestamp_lte: {end_date}
+                        }}
+                    ){{
+                        timestamp
+                        market{{
+                            id
+                            inputToken{{
+                            symbol
+                            }}
+                        }}
+                        rates{{
+                            rate
+                            side
+                        }}
+                        totalValueLockedUSD
+                        cumulativeSupplySideRevenueUSD
+                        dailySupplySideRevenueUSD
+                        cumulativeProtocolSideRevenueUSD
+                        dailyProtocolSideRevenueUSD
+                        cumulativeTotalRevenueUSD
+                        dailyTotalRevenueUSD
+                        totalDepositBalanceUSD
+                        dailyDepositUSD
+                        cumulativeDepositUSD
+                        totalBorrowBalanceUSD
+                        dailyBorrowUSD
+                        cumulativeBorrowUSD
+                        dailyLiquidateUSD
+                        cumulativeLiquidateUSD
+                        dailyWithdrawUSD
+                        dailyRepayUSD
+                        inputTokenBalance
+                        inputTokenPriceUSD
+                        outputTokenSupply
+                        outputTokenPriceUSD
+                        exchangeRate
+                        rewardTokenEmissionsAmount
+                        rewardTokenEmissionsUSD
+                    }}
+            }}'''
+}
 
-        'variables' : {
-            'market': market,
-            'skip': skip,
-            'start_date': start_date,
-            'end_date': end_date
-        }   
-    }
+async def main():
+    dfs = await asyncio.gather(
+        get_protocol(subgraph_dict, payload1),
+        get_all_version_schema(subgraph_dict, 'usageMetricsDailySnapshots', st.session_state.start_date_updated, st.session_state.end_date_updated),
+        get_all_version_schema(subgraph_dict, 'financialsDailySnapshots', st.session_state.start_date_updated, st.session_state.end_date_updated)
+    )
+    return dfs
 
-    response = requests.post(BASE_URL, json=payload).json()
-    tmp_df = pd.DataFrame(response['data'][list(response['data'])[0]])
-    df = tmp_df.copy()
-    while len(tmp_df.index) == 1000:
-        skip += 1000
-        payload['variables']['skip'] = skip
-        response = requests.post(BASE_URL, json=payload).json()
-        tmp_df = pd.DataFrame(response['data'][list(response['data'])[0]])
-        df = pd.concat([df, tmp_df])
-    return df
+dfm1, dfm2, dfm3 = asyncio.run(main())
+dfm4 = asyncio.run(get_all_protocol_markets(payload2, subgraph_dict, dfm1.loc[(),['id']], st.session_state.start_date_updated, st.session_state.end_date_updated))
 
-def get_all_markets(BASE_URL:str, markets, start_date:int, end_date:int) -> pd.DataFrame:
-    df = pd.DataFrame()
-    for market in markets['id']:
-        tmpdf = get_market(BASE_URL, market, start_date, end_date)
-        df = pd.concat([df, tmpdf])
-    return df
 
-@st.cache
-def get_all_protocol_markets(_subgraph_dict, markets, _start_date, _end_date)-> pd.DataFrame:
-    versions_df_list = []
-    #interact in the subgraph_dict
-    for k1 in list(_subgraph_dict.keys()):
-        #inicialize a list which is going to receive a df with all chains selected
-        chains_df_list = []
-        for k2 in list(_subgraph_dict[k1].keys()):
-            #get the subgraph URL
-            BASE_URL = _subgraph_dict[k1][k2]
-            df_temp = get_all_markets(BASE_URL, markets.loc[(k1, k2),['id']], _start_date, _end_date)
-            df_temp = df_temp.astype({'timestamp': 'int',
-                                    'totalValueLockedUSD': 'double',
-                                    'cumulativeSupplySideRevenueUSD': 'double',
-                                    'dailySupplySideRevenueUSD': 'double',
-                                    'cumulativeProtocolSideRevenueUSD': 'double',
-                                    'dailyProtocolSideRevenueUSD': 'double',
-                                    'cumulativeTotalRevenueUSD': 'double',
-                                    'dailyTotalRevenueUSD': 'double',
-                                    'totalDepositBalanceUSD': 'double',
-                                    'dailyDepositUSD': 'double',
-                                    'cumulativeDepositUSD': 'double',
-                                    'totalBorrowBalanceUSD': 'double',
-                                    'dailyBorrowUSD': 'double',
-                                    'cumulativeBorrowUSD': 'double',
-                                    'dailyLiquidateUSD': 'double',
-                                    'cumulativeLiquidateUSD': 'double',
-                                    'dailyWithdrawUSD': 'double',
-                                    'dailyRepayUSD': 'double',
-                                    'inputTokenBalance': 'double',
-                                    'inputTokenPriceUSD': 'double',
-                                    'outputTokenSupply': 'double',
-                                    'outputTokenPriceUSD': 'double',
-                                    'exchangeRate': 'double'})
-            df_temp['timestamp'] = pd.to_datetime(df_temp['timestamp'], unit='s').dt.to_period('D').dt.to_timestamp()
-            df_temp.set_index('timestamp', inplace=True)
-            df_temp.sort_index(inplace=True)
-            df_temp = pd.concat([pd.json_normalize(df_temp['market']).set_index(df_temp.index), df_temp.drop('market', axis=1)], axis=1)
-            chains_df_list.append(df_temp)
-
-        chainsdf = pd.concat(chains_df_list, keys = list(_subgraph_dict[k1].keys()), names=['Chain'], axis=0)
-        versions_df_list.append(chainsdf)
-
-    _dfm4 = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
-    return(_dfm4)
-
-dfm4 = get_all_protocol_markets(subgraph_dict, dfm1.loc[(),['id']], st.session_state.start_date_updated, st.session_state.end_date_updated)
+df_markets = dfm1.copy()
+df_usageMetrics = dfm2.copy()
+df_financials = dfm3.copy()
 df_markets_snapshots = dfm4.copy()
+
+
 
 yulesa_template = dict(
     layout=go.Layout(
