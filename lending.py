@@ -140,7 +140,7 @@ def choose_granularity(_key:str) -> str:
     choice = st.radio(
         'Data granulariry:',
          ['Day', 'Week', 'Month', 'Quarter'],
-        index=2, #Start with months.
+        index=1, #Start with weeks.
         horizontal=True,
         key=_key)
     
@@ -958,7 +958,7 @@ df15.sort_index(inplace = True)
 
 fig15a = go.Figure()
 for token_address in filter(None, df15['id'].unique().tolist()):
-    fig15a.add_trace(go.Scatter(name=df15.loc[df15['id'] == token_address].iloc[0,1], x=df15.index, y=df15.loc[df15['id'] == token_address].iloc[:,2], mode='lines'))
+    fig15a.add_trace(go.Scatter(name=df15.loc[df15['id'] == token_address].iloc[0,1], x=df15.index.unique(), y=df15.loc[df15['id'] == token_address].iloc[:,2], mode='lines'))
 
 fig15a.update_layout(
     title_text=f'<b>{title15a}</b>',
@@ -971,7 +971,7 @@ graph_placeholder15a.plotly_chart(fig15a, use_container_width=True)
 title15b = 'Lender Rate'
 fig15b = go.Figure()
 for token_address in filter(None, df15['id'].unique().tolist()):
-    fig15b.add_trace(go.Scatter(name=df15.loc[df15['id'] == token_address].iloc[0,1], x=df15.index, y=df15.loc[df15['id'] == token_address].iloc[:,3], mode='lines'))
+    fig15b.add_trace(go.Scatter(name=df15.loc[df15['id'] == token_address].iloc[0,1], x=df15.index.unique(), y=df15.loc[df15['id'] == token_address].iloc[:,3], mode='lines'))
 
 fig15b.update_layout(
     title_text=f'<b>{title15b}</b>',
