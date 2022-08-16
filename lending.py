@@ -3,8 +3,11 @@ import pandas as pd
 import requests
 import asyncio
 import datetime
+
 from datetime import datetime as dt
 from subgrounds import Subgrounds
+from aiocache import Cache
+from aiocache import cached
 
 
 import plotly.graph_objs as go
@@ -15,9 +18,14 @@ from plotly.subplots import make_subplots
 #######################################################################################################
 
 
-st.set_page_config(layout="wide")
 
-###### Side Bar ######
+###### Main Page ######
+
+
+st.set_page_config(layout="wide")
+st.title('Messari: Protocol Analytics')
+st.write('Yule Andrade  using Messari Subgraphs')
+
 
 subgraphs = requests.get('https://subgraphs.messari.io/deployments.json')
 subgraph_json = subgraphs.json()
@@ -43,41 +51,46 @@ protocols = ['aave',
              'rari-fuse',
              'scream',
              'tectonic',
-             'venus']
+             'venus'
+]
+             
+selection_layout = st.columns([2,3,3,1,1])
 
-protocol = st.sidebar.selectbox(
-    'Select a protocol:',
-    protocols,
-    index = 6,
-    key='protocol')
+with selection_layout[0]: 
+    protocol = st.selectbox(
+        'Protocol:',
+        protocols,
+        index = 6,
+        key='protocol')
 
 versions = [k for k in list(subgraph_json['lending'].keys()) if protocol in k]
-version = st.sidebar.multiselect(
-    'Select the  versions:',
-    versions,
-    default = versions, #autoselect all
-    key='version')
+
+with selection_layout[1]: 
+    version = st.multiselect(
+        'Versions:',
+        versions,
+        default = versions, #autoselect all
+        key='version')
 
 chains = []
 for v in version:
     for c in subgraph_json['lending'][v].keys():
         chains.append(v + ' ' + c)
 
+with selection_layout[2]:
+    chain = st.multiselect(
+        'Chain:',
+        chains,
+        default=chains,
+        key = 'chain')
 
-chain = st.sidebar.multiselect(
-    'Select a chain:',
-    chains,
-    default=chains,
-    key = 'chain')
 
 
 
-sidebar_layout = st.sidebar.columns(2)
-
-with sidebar_layout[0]: 
+with selection_layout[3]: 
     start_date = st.date_input('Start Date:', datetime.date(2022, 1, 1))
 
-with sidebar_layout[1]: 
+with selection_layout[4]: 
     end_date = st.date_input('End Date:', datetime.date(2025, 1, 1))
 
 start_date = int(dt.strptime(str(start_date), "%Y-%m-%d").timestamp())
@@ -92,7 +105,7 @@ if 'version_updated' not in st.session_state:
     st.session_state['protocol_updated'] = protocol
 
 #only update the state if button is pressed
-if st.sidebar.button('Update Data'):
+if st.button('Update Data'):
     st.session_state['version_updated'] = version
     st.session_state['chain_updated'] = chain
     st.session_state['start_date_updated'] = start_date
@@ -114,7 +127,14 @@ for k1 in list(temp_dict.keys()):
 
 
 
-#######################################################################################################
+
+st.write("## "+st.session_state.protocol_updated.title())
+
+
+
+
+#####################################################################
+
 
 def choose_granularity(_key:str) -> str:
     choice = st.radio(
@@ -146,7 +166,7 @@ def show_details(title:str, details:str, df):
            key=title+'_csv'
         )
 
-# @st.cache
+
 def get_df( _payload:str, BASE_URL:str) -> pd.DataFrame:
     response = requests.post(BASE_URL, json=_payload).json()
     df = pd.DataFrame(response['data'][list(response['data'])[0]])
@@ -163,6 +183,7 @@ async def get_version(_payload, _version_dict):
     chainsdf = pd.concat(chains_df_list, keys = list(_version_dict.keys()), names=['Chain'], axis=0)
     return chainsdf
 
+@cached(ttl=None, cache=Cache.MEMORY)
 async def get_protocol(_subgraph_dict, _payload)-> pd.DataFrame:
     versions_df_list = await asyncio.gather(*(get_version(_payload, _subgraph_dict[k1]) for k1 in list(_subgraph_dict.keys())))
     df = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
@@ -193,7 +214,7 @@ async def get_all_chain_schema(_chain_dict, _fieldPath:str, _start_date, _end_da
     chainsdf = pd.concat(chains_df_list, keys = list(_chain_dict.keys()), names=['Chain'], axis=0)
     return chainsdf
 
-# @st.cache
+@cached(ttl=None, cache=Cache.MEMORY)
 async def get_all_version_schema(_version_dict, _fieldPath:str, _start_date, _end_date) -> pd.DataFrame:   
     versions_df_list = await asyncio.gather(*(get_all_chain_schema(_version_dict[k], _fieldPath, _start_date, _end_date) for k in _version_dict.keys()))
     versiondf = pd.concat(versions_df_list, keys = list(_version_dict.keys()), names=['Version'], axis=0)
@@ -258,7 +279,7 @@ async def get_all_chains_markets(_payload:str, _chain_dict, _markets, _start_dat
     chainsdf.sort_index()
     return chainsdf
 
-# @st.cache
+@cached(ttl=None, cache=Cache.MEMORY)
 async def get_all_protocol_markets(_payload:str, _version_dict, _markets, _start_date, _end_date)-> pd.DataFrame:
     versions_df_list = await asyncio.gather(*(get_all_chains_markets(_payload, _version_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _version_dict.keys()))
     versionsdf = pd.concat(versions_df_list,keys = list(_version_dict.keys()), names=['Version'], axis=0)
@@ -335,14 +356,14 @@ payload2 =  {
 
 async def main():
     dfs = await asyncio.gather(
-        get_protocol(subgraph_dict, payload1),
         get_all_version_schema(subgraph_dict, 'usageMetricsDailySnapshots', st.session_state.start_date_updated, st.session_state.end_date_updated),
-        get_all_version_schema(subgraph_dict, 'financialsDailySnapshots', st.session_state.start_date_updated, st.session_state.end_date_updated)
+        get_all_version_schema(subgraph_dict, 'financialsDailySnapshots', st.session_state.start_date_updated, st.session_state.end_date_updated),
+        get_all_protocol_markets(payload2, subgraph_dict, dfm1.loc[(),['id']], st.session_state.start_date_updated, st.session_state.end_date_updated)
     )
     return dfs
 
-dfm1, dfm2, dfm3 = asyncio.run(main())
-dfm4 = asyncio.run(get_all_protocol_markets(payload2, subgraph_dict, dfm1.loc[(),['id']], st.session_state.start_date_updated, st.session_state.end_date_updated))
+dfm1 = asyncio.run(get_protocol(subgraph_dict, payload1))
+dfm2, dfm3, dfm4 = asyncio.run(main())
 
 
 df_markets = dfm1.copy()
@@ -371,12 +392,6 @@ yulesa_template = dict(
 #######################################################################################################
 
 
-
-
-###### Main Page ######
-
-st.title('Messari: Lending Financial Dashboard')
-st.write("## "+st.session_state.protocol_updated.title())
 
 
 #### Charts Row 1 ####
