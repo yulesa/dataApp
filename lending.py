@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import asyncio
+import aiohttp
 import datetime
 
 from datetime import datetime as dt
@@ -167,25 +168,35 @@ def show_details(title:str, details:str, df):
         )
 
 
-def get_df( _payload:str, BASE_URL:str) -> pd.DataFrame:
-    response = requests.post(BASE_URL, json=_payload).json()
+@cached(ttl=None, cache=Cache.MEMORY)
+async def get_df(_session: aiohttp.ClientSession, _payload:str, BASE_URL:str) -> pd.DataFrame:
+    req = await _session.request('POST', url=BASE_URL, json=_payload)
+    response = await req.json()
+    
+    # Error catching
+    if "data" not in response:
+        st.write(f"warning, no data: {BASE_URL} {response} {_payload}")
+        return pd.DataFrame()
+
     df = pd.DataFrame(response['data'][list(response['data'])[0]])
+    if df.empty:
+        st.write(f"warning, empty response {BASE_URL} {_payload}")
     return df
- 
-async def get_chain(_payload:str, _BASE_URL:str) -> pd.DataFrame:
-    df = get_df(_payload, _BASE_URL)
+    
+async def get_chain(_session: aiohttp.ClientSession, _payload:str, _BASE_URL:str) -> pd.DataFrame:
+    df = await get_df(_session, _payload, _BASE_URL)
     df['inputToken'] = pd.DataFrame([*df['inputToken']])[['symbol']]
     df.set_index('inputToken', inplace=True)
     return df
 
-async def get_version(_payload, _version_dict):
-    chains_df_list = await asyncio.gather(*(get_chain(_payload, _version_dict[k2]) for k2 in list(_version_dict.keys())))
+async def get_version(_session: aiohttp.ClientSession, _payload, _version_dict):
+    chains_df_list = await asyncio.gather(*(get_chain(_session, _payload, _version_dict[k2]) for k2 in list(_version_dict.keys())))
     chainsdf = pd.concat(chains_df_list, keys = list(_version_dict.keys()), names=['Chain'], axis=0)
     return chainsdf
 
-@cached(ttl=None, cache=Cache.MEMORY)
 async def get_protocol(_subgraph_dict, _payload)-> pd.DataFrame:
-    versions_df_list = await asyncio.gather(*(get_version(_payload, _subgraph_dict[k1]) for k1 in list(_subgraph_dict.keys())))
+    async with aiohttp.ClientSession() as session:
+        versions_df_list = await asyncio.gather(*(get_version(session, _payload, _subgraph_dict[k1]) for k1 in list(_subgraph_dict.keys())))
     df = pd.concat(versions_df_list,keys = list(_subgraph_dict.keys()), names=['Version'], axis=0)
     df['totalDepositBalanceUSD'] = df['totalDepositBalanceUSD'].astype('double')
     df['totalBorrowBalanceUSD'] = df['totalBorrowBalanceUSD'].astype('double')
@@ -197,7 +208,9 @@ async def get_protocol(_subgraph_dict, _payload)-> pd.DataFrame:
 
 
 
-# @st.cache   
+
+
+@cached(ttl=None, cache=Cache.MEMORY)
 async def get_all_schema(_BASE_URL:str, _fieldPath:str, _start_date, _end_date) -> pd.DataFrame:
     sg = Subgrounds()
     protocol = sg.load_subgraph(_BASE_URL)
@@ -214,7 +227,6 @@ async def get_all_chain_schema(_chain_dict, _fieldPath:str, _start_date, _end_da
     chainsdf = pd.concat(chains_df_list, keys = list(_chain_dict.keys()), names=['Chain'], axis=0)
     return chainsdf
 
-@cached(ttl=None, cache=Cache.MEMORY)
 async def get_all_version_schema(_version_dict, _fieldPath:str, _start_date, _end_date) -> pd.DataFrame:   
     versions_df_list = await asyncio.gather(*(get_all_chain_schema(_version_dict[k], _fieldPath, _start_date, _end_date) for k in _version_dict.keys()))
     versiondf = pd.concat(versions_df_list, keys = list(_version_dict.keys()), names=['Version'], axis=0)
@@ -227,22 +239,21 @@ async def get_all_version_schema(_version_dict, _fieldPath:str, _start_date, _en
 
 
 
-# @st.cache   
-async def get_market(_payload:str, _BASE_URL:str, _market:str, _start_date:int, _end_date:int) -> pd.DataFrame:
+async def get_market(_session: aiohttp.ClientSession, _payload:str, _BASE_URL:str, _market:str, _start_date:int, _end_date:int) -> pd.DataFrame:
     _skip = 0
     edited_payload = _payload.copy()
     edited_payload['query'] = _payload['query'].format(market=_market, start_date=_start_date, end_date=_end_date, skip=_skip)
-    tmp_df = get_df( edited_payload, _BASE_URL)
+    tmp_df = await get_df(_session, edited_payload, _BASE_URL)
     df = tmp_df.copy()
     while len(tmp_df.index) == 1000:
         _skip += 1000
         edited_payload['query'] = _payload['query'].format(market=_market, start_date=_start_date, end_date=_end_date, skip=_skip)
-        tmp_df = get_df(edited_payload, _BASE_URL)
+        tmp_df = await get_df(_session, edited_payload, _BASE_URL)
         df = pd.concat([df, tmp_df])
     return df
 
-async def get_all_markets(_payload:str, _BASE_URL:str, _markets, _start_date:int, _end_date:int) -> pd.DataFrame:
-    markets_df = await asyncio.gather(*(get_market(_payload, _BASE_URL, market, _start_date, _end_date) for market in _markets['id']))
+async def get_all_markets(_session: aiohttp.ClientSession, _payload:str, _BASE_URL:str, _markets, _start_date:int, _end_date:int) -> pd.DataFrame:
+    markets_df = await asyncio.gather(*(get_market(_session, _payload, _BASE_URL, market, _start_date, _end_date) for market in _markets['id']))
     df = pd.concat(markets_df)
     df = df.astype({'timestamp': 'int',
                             'totalValueLockedUSD': 'double',
@@ -273,20 +284,18 @@ async def get_all_markets(_payload:str, _BASE_URL:str, _markets, _start_date:int
     df = pd.concat([pd.json_normalize(df['market']).set_index(df.index), df.drop('market', axis=1)], axis=1)
     return df
 
-async def get_all_chains_markets(_payload:str, _chain_dict, _markets, _start_date:int, _end_date:int)-> pd.DataFrame:
-    chains_df_list = await asyncio.gather(*(get_all_markets(_payload, _chain_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _chain_dict.keys()))
+async def get_all_chains_markets(_session: aiohttp.ClientSession, _payload:str, _chain_dict, _markets, _start_date:int, _end_date:int)-> pd.DataFrame:
+    chains_df_list = await asyncio.gather(*(get_all_markets(_session, _payload, _chain_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _chain_dict.keys()))
     chainsdf = pd.concat(chains_df_list, keys = list(_chain_dict.keys()), names=['Chain'], axis=0)
     chainsdf.sort_index()
     return chainsdf
 
-@cached(ttl=None, cache=Cache.MEMORY)
 async def get_all_protocol_markets(_payload:str, _version_dict, _markets, _start_date, _end_date)-> pd.DataFrame:
-    versions_df_list = await asyncio.gather(*(get_all_chains_markets(_payload, _version_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _version_dict.keys()))
-    versionsdf = pd.concat(versions_df_list,keys = list(_version_dict.keys()), names=['Version'], axis=0)
-    versionsdf.sort_index()
-    return(versionsdf)
-
-
+    async with aiohttp.ClientSession() as session:
+        versions_df_list = await asyncio.gather(*(get_all_chains_markets(session, _payload, _version_dict[k], _markets.loc[(k),['id']], _start_date, _end_date) for k in _version_dict.keys()))
+        versionsdf = pd.concat(versions_df_list,keys = list(_version_dict.keys()), names=['Version'], axis=0)
+        versionsdf.sort_index()
+        return(versionsdf)
 
 payload1 = {
                 'query': 
